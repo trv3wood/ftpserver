@@ -60,8 +60,8 @@ impl FtpMessage {
             msg: msg.to_string(),
         }
     }
-    pub fn string(&self) -> String {
-        format!("{} {}\r\n", self.code as u16, self.msg)
+    pub fn to_vec(&self) -> Vec<u8> {
+        format!("{} {}\r\n", self.code as u16, self.msg).into_bytes()
     }
 }
 
@@ -72,10 +72,8 @@ mod tests {
     #[test]
     fn ftpmsg() {
         assert_eq!(
-            FtpMessage::new(FtpReplyCode::CommandOk, "Service ready for new user")
-                .string()
-                .as_str(),
-            "200 Service ready for new user\r\n"
+            &FtpMessage::new(FtpReplyCode::CommandOk, "Service ready for new user").to_vec()[..],
+            b"200 Service ready for new user\r\n"
         );
     }
 }
