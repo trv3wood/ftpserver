@@ -9,7 +9,6 @@ pub struct Session {
     socket: TcpStream,
 }
 
-#[allow(non_snake_case)]
 impl Session {
     pub fn new(socket: TcpStream) -> Self {
         Self { socket }
@@ -21,7 +20,7 @@ impl Session {
             if n == 0 {
                 break;
             }
-            let s = String::from_utf8((buf[..n]).to_vec()).unwrap();
+            let s = String::from_utf8((buf[..n].to_ascii_uppercase()).to_vec()).unwrap();
             let s = s.trim_end();
             let (cmdtype, args) = match s.split_once(' ') {
                 Some(cmd) => cmd,
@@ -29,8 +28,8 @@ impl Session {
             };
             dbg!(cmdtype, args);
             match cmdtype {
-                "USER" => self.USER(args).await,
-                "PASS" => self.PASS(args).await,
+                "USER" => self.user(args).await,
+                "PASS" => self.pass(args).await,
                 _ => {
                     Session::send_response(
                         self.socket_mut(),
@@ -55,7 +54,7 @@ impl Session {
     ) -> io::Result<()> {
         socket.write_all(&FtpMessage::new(code, msg).to_vec()).await
     }
-    pub async fn USER(&mut self, _s: &str) {
+    pub async fn user(&mut self, _s: &str) {
         if let Err(e) = Session::send_response(
             self.socket_mut(),
             FtpReplyCode::UserNameOk,
@@ -66,7 +65,7 @@ impl Session {
             eprintln!("{e}");
         }
     }
-    pub async fn PASS(&mut self, _s: &str) {
+    pub async fn pass(&mut self, _s: &str) {
         if let Err(e) =
             Session::send_response(self.socket_mut(), FtpReplyCode::UserLoggedIn, "logged in.")
                 .await
