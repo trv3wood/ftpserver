@@ -13,14 +13,13 @@ impl Session {
     pub fn new(socket: TcpStream) -> Self {
         Self { socket }
     }
-    // echo
     pub async fn process(&mut self) -> std::io::Result<()> {
-        let mut buf = Box::new([0; 128]);
-        while let Ok(n) = self.socket.read(&mut *buf).await {
+        let mut buf = vec![0; 128];
+        while let Ok(n) = self.socket.read(&mut buf).await {
             if n == 0 {
                 break;
             }
-            let s = String::from_utf8((buf[..n].to_ascii_uppercase()).to_vec()).unwrap();
+            let s = String::from_utf8(buf[..n].to_ascii_uppercase()).unwrap();
             let s = s.trim_end();
             let (cmdtype, args) = match s.split_once(' ') {
                 Some(cmd) => cmd,
@@ -30,6 +29,7 @@ impl Session {
             match cmdtype {
                 "USER" => self.user(args).await,
                 "PASS" => self.pass(args).await,
+                "ACCT" => self.acct(args).await,
                 _ => {
                     Session::send_response(
                         self.socket_mut(),
@@ -54,7 +54,7 @@ impl Session {
     ) -> io::Result<()> {
         socket.write_all(&FtpMessage::new(code, msg).to_vec()).await
     }
-    pub async fn user(&mut self, _s: &str) {
+    async fn user(&mut self, _s: &str) {
         if let Err(e) = Session::send_response(
             self.socket_mut(),
             FtpReplyCode::UserNameOk,
@@ -65,12 +65,23 @@ impl Session {
             eprintln!("{e}");
         }
     }
-    pub async fn pass(&mut self, _s: &str) {
+    async fn pass(&mut self, _s: &str) {
         if let Err(e) =
             Session::send_response(self.socket_mut(), FtpReplyCode::UserLoggedIn, "logged in.")
                 .await
         {
             eprintln!("{e}");
         }
+    }
+    pub async fn acct(&mut self, _s: &str) {
+        if let Err(e) =
+            Session::send_response(self.socket_mut(), FtpReplyCode::UserLoggedIn, "logged in.")
+                .await
+        {
+            eprintln!("{e}");
+        }
+    }
+    pub async fn cwd(&mut self, s: &str) {
+
     }
 }

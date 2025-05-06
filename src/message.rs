@@ -72,7 +72,7 @@ mod tests {
     #[test]
     fn ftpmsg() {
         assert_eq!(
-            &FtpMessage::new(FtpReplyCode::CommandOk, "Service ready for new user").to_vec()[..],
+            FtpMessage::new(FtpReplyCode::CommandOk, "Service ready for new user").to_vec().as_slice(),
             b"200 Service ready for new user\r\n"
         );
     }
