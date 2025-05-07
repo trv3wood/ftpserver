@@ -78,7 +78,7 @@ impl Session {
                 Some(cmd) => cmd,
                 None => (s, ""),
             };
-            dbg!(cmdtype, args);
+            log::debug!("cmdtype {} args {}", cmdtype, args);
             match cmdtype.to_uppercase().as_str() {
                 "USER" => self.user(args).await,
                 "PASS" => self.pass(args).await,

@@ -8,7 +8,13 @@ mod session;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    env_logger::init_from_env(env_logger::Env::default().default_filter_or("debug"));
+    #[cfg(debug_assertions)]
+    let env = env_logger::Env::default().filter_or("RUST_LOG", "debug");
+    
+    #[cfg(not(debug_assertions))]
+    let env = env_logger::Env::default().filter_or("RUST_LOG", "warn");
+
+    env_logger::init_from_env(env);
     let listener = TcpListener::bind("0.0.0.0:2121").await?;
     log::info!("Listening on {}", listener.local_addr()?);
     let (send, mut recv) = mpsc::channel(1);
