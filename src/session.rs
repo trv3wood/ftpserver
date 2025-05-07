@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
+    sync::{broadcast, mpsc},
 };
 
 use crate::message::{FtpMessage, FtpReplyCode};
@@ -42,20 +43,43 @@ impl Session {
             working_dir: PathBuf::from("C:\\ftp"),
         }
     }
-    pub async fn process(&mut self) -> std::io::Result<()> {
+    pub async fn run(
+        &mut self,
+        mut shutdown: broadcast::Receiver<()>,
+        _close_complete: mpsc::Sender<()>,
+    ) -> std::io::Result<()> {
+        Session::send_response(
+            self.socket_mut(),
+            FtpReplyCode::ServiceReadyForNewUser,
+            "Service ready for new user",
+        )
+        .await?;
+        tokio::select! {
+            res = self.process() => {
+                if let Err(e) = res {
+                    log::error!("Error processing command: {}", e);
+                }
+            }
+            _ = shutdown.recv() => {
+                log::info!("Received shutdown signal, closing session.");
+            }
+        }
+        Ok(())
+    }
+    async fn process(&mut self) -> std::io::Result<()> {
         let mut buf = vec![0; 128];
         while let Ok(n) = self.socket.read(&mut buf).await {
             if n == 0 {
                 break;
             }
-            let s = String::from_utf8(buf[..n].to_ascii_uppercase()).unwrap();
+            let s = String::from_utf8(buf[..n].to_vec()).unwrap();
             let s = s.trim_end();
             let (cmdtype, args) = match s.split_once(' ') {
                 Some(cmd) => cmd,
                 None => (s, ""),
             };
             dbg!(cmdtype, args);
-            match cmdtype {
+            match cmdtype.to_uppercase().as_str() {
                 "USER" => self.user(args).await,
                 "PASS" => self.pass(args).await,
                 "ACCT" => self.acct(args).await,
@@ -86,6 +110,7 @@ impl Session {
         socket.write_all(&FtpMessage::new(code, msg).to_vec()).await
     }
     async fn user(&mut self, _s: &str) -> std::io::Result<()> {
+        log::debug!("user: {}", _s);
         Session::send_response(
             self.socket_mut(),
             FtpReplyCode::UserNameOk,
@@ -127,7 +152,7 @@ impl Session {
         let new_working_dir = self.root.join(new_working_dir);
         match new_working_dir.canonicalize() {
             Ok(path) => {
-                if path.starts_with(&self.root){
+                if path.starts_with(&self.root) {
                     Session::send_response(
                         self.socket_mut(),
                         FtpReplyCode::FileActionCompleted,
