@@ -7,11 +7,15 @@ use crate::message::{FtpMessage, FtpReplyCode};
 
 pub struct Session {
     socket: TcpStream,
+    logged: bool,
 }
 
 impl Session {
     pub fn new(socket: TcpStream) -> Self {
-        Self { socket }
+        Self {
+            socket,
+            logged: false,
+        }
     }
     pub async fn process(&mut self) -> std::io::Result<()> {
         let mut buf = vec![0; 128];
@@ -29,7 +33,7 @@ impl Session {
             match cmdtype {
                 "USER" => self.user(args).await,
                 "PASS" => self.pass(args).await,
-                "ACCT" => self.acct(args).await,
+                "ACCT" => self.acct(args).await?,
                 _ => {
                     Session::send_response(
                         self.socket_mut(),
@@ -42,6 +46,21 @@ impl Session {
         }
         println!("Close Connection from {:?}", self.socket.peer_addr());
         Ok(())
+    }
+    async fn logged_and<F>(&mut self, args: &str, f: F) -> std::io::Result<()>
+    where
+        F: Fn(&mut Self, &str) -> std::io::Result<()>,
+    {
+        if !self.logged {
+            Session::send_response(
+                self.socket_mut(),
+                FtpReplyCode::NotLoggedIn,
+                "Not logged in",
+            )
+            .await?;
+            return Ok(());
+        }
+        f(self, args)
     }
     fn socket_mut(&mut self) -> &mut TcpStream {
         &mut self.socket
@@ -73,15 +92,18 @@ impl Session {
             eprintln!("{e}");
         }
     }
-    pub async fn acct(&mut self, _s: &str) {
-        if let Err(e) =
-            Session::send_response(self.socket_mut(), FtpReplyCode::UserLoggedIn, "logged in.")
-                .await
-        {
-            eprintln!("{e}");
-        }
+    pub async fn acct(&mut self, _s: &str) -> std::io::Result<()> {
+        Session::send_response(
+            self.socket_mut(),
+            FtpReplyCode::SyntaxErrorUnrecognizedCommand,
+            "Unsupported command",
+        )
+        .await
     }
-    pub async fn cwd(&mut self, s: &str) {
-
+    pub async fn cwd(&mut self, s: &str) -> std::io::Result<()> {
+        let new_working_dir = std::path::Path::new(s);
+        self.logged_and(s, |session, arg| {
+            todo!()
+        }).await
     }
 }
