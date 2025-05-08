@@ -134,8 +134,10 @@ impl Session {
                 .await?;
             return Ok(());
         }
+        dbg!(&self.working_dir);
         let given_path = std::path::Path::new(&s);
-        if !given_path.is_dir() {
+        dbg!(given_path.is_relative());
+        if !given_path.is_dir() && !given_path.is_relative() {
             self.send_response(
                 FtpReplyCode::ActionNotTaken,
                 "The given resource is not a directory.",
@@ -147,7 +149,7 @@ impl Session {
     }
 
     async fn exec_cwd(&mut self, path: &Path) -> std::io::Result<()> {
-        match path.canonicalize() {
+        match dbg!(path.canonicalize()) {
             Ok(path) => {
                 // 处理路径前缀
                 #[cfg(target_os = "windows")]
@@ -186,7 +188,7 @@ impl Session {
             self.send_response(
                 FtpReplyCode::PathnameCreated,
                 &format!(
-                    "~/{}",
+                    "/{}",
                     self.working_dir
                         .strip_prefix(self.root.as_path())
                         .unwrap()
