@@ -10,7 +10,7 @@ mod session;
 async fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(debug_assertions)]
     let env = env_logger::Env::default().filter_or("RUST_LOG", "debug");
-    
+
     #[cfg(not(debug_assertions))]
     let env = env_logger::Env::default().filter_or("RUST_LOG", "warn");
 
@@ -23,8 +23,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // 主循环接受连接
         _ = async {
             loop {
-                let (socket, _) = listener.accept().await?;
-                log::info!("Accepted connection from {}", socket.peer_addr()?);
+                let (socket, addr) = listener.accept().await?;
+                log::info!("Accepted connection from {}", addr);
 
                 let mut session = Session::new(socket);
                 let shutdown_notify = shutdown_send.subscribe();

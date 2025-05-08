@@ -1,8 +1,12 @@
-use std::path::PathBuf;
+use std::{
+    env::current_dir,
+    io::ErrorKind,
+    path::{Path, PathBuf},
+};
 
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
     sync::{broadcast, mpsc},
 };
 
@@ -13,16 +17,14 @@ pub struct Session {
     logged: bool,
     root: PathBuf,
     working_dir: PathBuf,
+    data_listener: Option<TcpListener>,
 }
 macro_rules! logged {
     ($session:ident) => {
         if !$session.logged {
-            Session::send_response(
-                $session.socket_mut(),
-                FtpReplyCode::NotLoggedIn,
-                "Not logged in",
-            )
-            .await?;
+            $session
+                .send_response(FtpReplyCode::NotLoggedIn, "Not logged in")
+                .await?;
             return Ok(());
         }
     };
@@ -41,6 +43,11 @@ impl Session {
             root: PathBuf::from("C:\\ftp"),
             #[cfg(target_os = "windows")]
             working_dir: PathBuf::from("C:\\ftp"),
+            #[cfg(target_os = "macos")]
+            root: current_dir().unwrap(),
+            #[cfg(target_os = "macos")]
+            working_dir: current_dir().unwrap(),
+            data_listener: None,
         }
     }
     pub async fn run(
@@ -48,8 +55,7 @@ impl Session {
         mut shutdown: broadcast::Receiver<()>,
         _close_complete: mpsc::Sender<()>,
     ) -> std::io::Result<()> {
-        Session::send_response(
-            self.socket_mut(),
+        self.send_response(
             FtpReplyCode::ServiceReadyForNewUser,
             "Service ready for new user",
         )
@@ -74,57 +80,54 @@ impl Session {
             }
             let s = String::from_utf8(buf[..n].to_vec()).unwrap();
             let s = s.trim_end();
+            log::debug!("received command: {}", s);
             let (cmdtype, args) = match s.split_once(' ') {
                 Some(cmd) => cmd,
                 None => (s, ""),
             };
-            log::debug!("cmdtype {} args {}", cmdtype, args);
             match cmdtype.to_uppercase().as_str() {
                 "USER" => self.user(args).await,
                 "PASS" => self.pass(args).await,
                 "ACCT" => self.acct(args).await,
                 "CWD" => self.cwd(args).await,
-                _ => {
-                    Session::send_response(
-                        self.socket_mut(),
-                        FtpReplyCode::CommandNotImplemented,
-                        "CommandNotImplemented",
+                "PWD" => self.pwd(args).await,
+                "LIST" => self.list(args).await,
+                "PASV" => self.pasv(args).await,
+                "QUIT" => {
+                    self.send_response(
+                        FtpReplyCode::ServiceClosingControlConnection,
+                        "Connection shutting down",
                     )
-                    .await
+                    .await?;
+                    break;
+                }
+                _ => {
+                    self.send_response(FtpReplyCode::CommandNotImplemented, "CommandNotImplemented")
+                        .await
                 }
             }?
         }
-        println!("Close Connection from {:?}", self.socket.peer_addr());
+        log::info!("Close Connection from {}", self.socket.peer_addr()?);
         Ok(())
     }
 
-    fn socket_mut(&mut self) -> &mut TcpStream {
-        &mut self.socket
-    }
-
-    async fn send_response(
-        socket: &mut TcpStream,
-        code: FtpReplyCode,
-        msg: &str,
-    ) -> io::Result<()> {
-        socket.write_all(&FtpMessage::new(code, msg).to_vec()).await
+    async fn send_response(&mut self, code: FtpReplyCode, msg: &str) -> io::Result<()> {
+        self.socket
+            .write_all(&FtpMessage::new(code, msg).to_vec())
+            .await
     }
     async fn user(&mut self, _s: &str) -> std::io::Result<()> {
         log::debug!("user: {}", _s);
-        Session::send_response(
-            self.socket_mut(),
-            FtpReplyCode::UserNameOk,
-            "user name ok. need password.",
-        )
-        .await
+        self.send_response(FtpReplyCode::UserNameOk, "user name ok. need password.")
+            .await
     }
     async fn pass(&mut self, _s: &str) -> std::io::Result<()> {
         self.logged = true;
-        Session::send_response(self.socket_mut(), FtpReplyCode::UserLoggedIn, "logged in.").await
+        self.send_response(FtpReplyCode::UserLoggedIn, "logged in.")
+            .await
     }
     async fn acct(&mut self, _s: &str) -> std::io::Result<()> {
-        Session::send_response(
-            self.socket_mut(),
+        self.send_response(
             FtpReplyCode::SyntaxErrorUnrecognizedCommand,
             "Unsupported command",
         )
@@ -133,48 +136,114 @@ impl Session {
     async fn cwd(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
         if s.is_empty() {
-            Session::send_response(
-                self.socket_mut(),
-                FtpReplyCode::ActionNotTaken,
-                "No path given",
-            )
-            .await?
+            self.send_response(FtpReplyCode::ActionNotTaken, "No path given")
+                .await?;
+            return Ok(());
         }
-        let new_working_dir = std::path::Path::new(&s);
-        if !new_working_dir.is_dir() {
-            Session::send_response(
-                self.socket_mut(),
+        let given_path = std::path::Path::new(&s);
+        if !given_path.is_dir() {
+            self.send_response(
                 FtpReplyCode::ActionNotTaken,
                 "The given resource is not a directory.",
             )
-            .await?
+            .await?;
+            return Ok(());
         }
-        let new_working_dir = self.root.join(new_working_dir);
-        match new_working_dir.canonicalize() {
+        self.exec_cwd(given_path).await
+    }
+
+    async fn exec_cwd(&mut self, path: &Path) -> std::io::Result<()> {
+        let new_pwd = if path.is_relative() {
+            self.working_dir.join(path)
+        } else {
+            path.to_path_buf()
+        };
+        match new_pwd.canonicalize() {
             Ok(path) => {
                 if path.starts_with(&self.root) {
-                    Session::send_response(
-                        self.socket_mut(),
+                    self.send_response(
                         FtpReplyCode::FileActionCompleted,
                         &format!("Working directory changed to {}", path.display()),
                     )
                     .await?;
                     self.working_dir = path;
-                    log::debug!("new working dir: {:?}", new_working_dir);
+                    log::debug!("new working dir: {:?}", new_pwd);
+                    Ok(())
                 } else {
-                    Session::send_response(
-                        self.socket_mut(),
-                        FtpReplyCode::ActionNotTaken,
-                        "Path not in root",
-                    )
-                    .await?
+                    self.send_response(FtpReplyCode::ActionNotTaken, "Path not in root")
+                        .await
                 }
             }
             Err(e) => {
                 log::debug!("Error canonicalizing path: {}", e);
-                Session::send_response(self.socket_mut(), FtpReplyCode::ActionNotTaken, "Failed ot change directory: The given resource does not exist or permission denied.").await?
+                self.send_response(FtpReplyCode::ActionNotTaken, "Failed ot change directory: The given resource does not exist or permission denied.").await
             }
         }
-        Ok(())
+    }
+
+    async fn pwd(&mut self, _s: &str) -> std::io::Result<()> {
+        if !self.logged {
+            self.send_response(FtpReplyCode::ActionNotTaken, "Not logged in")
+                .await
+        } else {
+            self.send_response(
+                FtpReplyCode::PathnameCreated,
+                &format!("{:?}", self.working_dir.strip_prefix(self.root.as_path())),
+            )
+            .await
+        }
+    }
+    async fn pasv(&mut self, _s: &str) -> std::io::Result<()> {
+        logged!(self);
+        let listener = TcpListener::bind(format!("{}:0", self.socket.local_addr()?.ip())).await?;
+        let addr = listener.local_addr()?;
+        self.data_listener = Some(listener);
+
+        // 构造PASV响应
+        let (ip, port) = (addr.ip(), addr.port());
+        let (p1, p2) = (port >> 8, port & 0xFF);
+        if ip.is_ipv6() {
+            self.send_response(
+                FtpReplyCode::SyntaxErrorUnrecognizedCommand,
+                "pasv is for ipv4",
+            )
+            .await?;
+            return Ok(());
+        }
+        let ip = ip.to_string();
+        let mut ip = ip.split('.');
+
+        let response = format!(
+            "Entering Passive Mode ({},{},{},{},{},{})",
+            ip.next().unwrap(),
+            ip.next().unwrap(),
+            ip.next().unwrap(),
+            ip.next().unwrap(),
+            p1,
+            p2
+        );
+        self.send_response(FtpReplyCode::EnteringPassiveMode, &response)
+            .await
+    }
+    async fn list(&mut self, s: &str) -> std::io::Result<()> {
+        if let Some(data_listener) = &self.data_listener {
+            let (mut data_sock, _) = data_listener.accept().await?;
+            let (_, mut writer) = data_sock.split();
+            self.send_response(
+                FtpReplyCode::FileStatusOkOpeningDataConnection,
+                "Sending directory listing",
+            )
+            .await?;
+            let ls = std::process::Command::new("ls")
+                .arg(&self.working_dir.join(s))
+                .arg("-all")
+                .output().unwrap();
+            writer.write_all(&ls.stdout).await?;
+            self.data_listener = None;
+            return self
+                .send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
+                .await;
+        }
+        Err(ErrorKind::HostUnreachable.into())
     }
 }
