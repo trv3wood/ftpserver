@@ -1,5 +1,5 @@
 use std::{
-    env::current_dir,
+    env::set_current_dir,
     io::ErrorKind,
     path::{Path, PathBuf},
 };
@@ -35,18 +35,8 @@ impl Session {
         Self {
             socket,
             logged: false,
-            #[cfg(target_os = "linux")]
-            root: PathBuf::from("/var/ftp"),
-            #[cfg(target_os = "linux")]
-            working_dir: PathBuf::from("/var/ftp"),
-            #[cfg(target_os = "windows")]
-            root: PathBuf::from("C:\\ftp"),
-            #[cfg(target_os = "windows")]
-            working_dir: PathBuf::from("C:\\ftp"),
-            #[cfg(target_os = "macos")]
-            root: current_dir().unwrap(),
-            #[cfg(target_os = "macos")]
-            working_dir: current_dir().unwrap(),
+            root: std::env::current_dir().unwrap(),
+            working_dir: std::env::current_dir().unwrap(),
             data_listener: None,
         }
     }
@@ -93,6 +83,8 @@ impl Session {
                 "PWD" => self.pwd(args).await,
                 "LIST" => self.list(args).await,
                 "PASV" => self.pasv(args).await,
+                "RETR" => self.retr(args).await,
+                "TYPE" => self.r#type(args).await,
                 "QUIT" => {
                     self.send_response(
                         FtpReplyCode::ServiceClosingControlConnection,
@@ -153,21 +145,24 @@ impl Session {
     }
 
     async fn exec_cwd(&mut self, path: &Path) -> std::io::Result<()> {
-        let new_pwd = if path.is_relative() {
-            self.working_dir.join(path)
-        } else {
-            path.to_path_buf()
-        };
-        match new_pwd.canonicalize() {
+        match path.canonicalize() {
             Ok(path) => {
+                // 处理路径前缀
+                #[cfg(target_os = "windows")]
+                let path = path.to_str().unwrap().trim_start_matches(r"\\?\");
+                #[cfg(target_os = "windows")]
+                let path = PathBuf::from(path);
+
+                log::debug!("canonicalize path: {:?}", &path);
                 if path.starts_with(&self.root) {
                     self.send_response(
                         FtpReplyCode::FileActionCompleted,
                         &format!("Working directory changed to {}", path.display()),
                     )
                     .await?;
+                    log::debug!("new working dir: {:?}", &path);
                     self.working_dir = path;
-                    log::debug!("new working dir: {:?}", new_pwd);
+                    set_current_dir(&self.working_dir)?;
                     Ok(())
                 } else {
                     self.send_response(FtpReplyCode::ActionNotTaken, "Path not in root")
@@ -188,7 +183,13 @@ impl Session {
         } else {
             self.send_response(
                 FtpReplyCode::PathnameCreated,
-                &format!("{:?}", self.working_dir.strip_prefix(self.root.as_path())),
+                &format!(
+                    "~/{}",
+                    self.working_dir
+                        .strip_prefix(self.root.as_path())
+                        .unwrap()
+                        .display()
+                ),
             )
             .await
         }
@@ -202,14 +203,7 @@ impl Session {
         // 构造PASV响应
         let (ip, port) = (addr.ip(), addr.port());
         let (p1, p2) = (port >> 8, port & 0xFF);
-        if ip.is_ipv6() {
-            self.send_response(
-                FtpReplyCode::SyntaxErrorUnrecognizedCommand,
-                "pasv is for ipv4",
-            )
-            .await?;
-            return Ok(());
-        }
+
         let ip = ip.to_string();
         let mut ip = ip.split('.');
 
@@ -226,6 +220,7 @@ impl Session {
             .await
     }
     async fn list(&mut self, s: &str) -> std::io::Result<()> {
+        logged!(self);
         if let Some(data_listener) = &self.data_listener {
             let (mut data_sock, _) = data_listener.accept().await?;
             let (_, mut writer) = data_sock.split();
@@ -234,16 +229,67 @@ impl Session {
                 "Sending directory listing",
             )
             .await?;
-            let ls = std::process::Command::new("ls")
-                .arg(&self.working_dir.join(s))
-                .arg("-all")
-                .output().unwrap();
-            writer.write_all(&ls.stdout).await?;
+            let ls = self.exec_list_dir(&self.working_dir.join(s))?;
+            writer.write_all(ls.as_bytes()).await?;
             self.data_listener = None;
             return self
                 .send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
                 .await;
         }
         Err(ErrorKind::HostUnreachable.into())
+    }
+
+    fn exec_list_dir(&self, path: &Path) -> std::io::Result<String> {
+        let mut entries = String::new();
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            let mut file_name = entry.file_name().into_string().unwrap_or_default();
+            file_name.push('\n');
+            entries.push_str(&file_name);
+        }
+        Ok(entries)
+    }
+    async fn retr(&mut self, s: &str) -> std::io::Result<()> {
+        logged!(self);
+        if let Some(data_listener) = &self.data_listener {
+            let (mut data_sock, _) = data_listener.accept().await?;
+            let (_, mut writer) = data_sock.split();
+            self.send_response(
+                FtpReplyCode::FileStatusOkOpeningDataConnection,
+                "Sending file",
+            )
+            .await?;
+            let file_path = self.working_dir.join(s);
+            if file_path.exists() {
+                let mut file = tokio::fs::File::open(file_path).await?;
+                let mut buf = vec![0; 1024];
+                loop {
+                    let n = file.read(&mut buf).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    writer.write_all(&buf[..n]).await?;
+                }
+                self.data_listener = None;
+                return self
+                    .send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
+                    .await;
+            } else {
+                return self
+                    .send_response(FtpReplyCode::FileActionNotTaken, "File not found")
+                    .await;
+            }
+        }
+        Err(ErrorKind::HostUnreachable.into())
+    }
+    async fn r#type(&mut self, s: &str) -> std::io::Result<()> {
+        logged!(self);
+        match s.to_uppercase().as_str() {
+            "A" => self.send_response(FtpReplyCode::CommandOk, "Switching to ASCII mode").await,
+            "I" => self.send_response(FtpReplyCode::CommandOk, "Switching to Binary mode").await,
+            _ => self
+                .send_response(FtpReplyCode::ActionNotTaken, "Unsupported type")
+                .await,
+        }
     }
 }
