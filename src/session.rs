@@ -85,6 +85,8 @@ impl Session {
                 "PASV" => self.pasv(args).await,
                 "RETR" => self.retr(args).await,
                 "TYPE" => self.r#type(args).await,
+                "STOR" => self.stor(args).await,
+                "NOOP" => self.send_response(FtpReplyCode::CommandOk, "NOOP").await,
                 "QUIT" => {
                     self.send_response(
                         FtpReplyCode::ServiceClosingControlConnection,
@@ -103,7 +105,7 @@ impl Session {
         Ok(())
     }
 
-    async fn send_response(&mut self, code: FtpReplyCode, msg: &str) -> io::Result<()> {
+    pub async fn send_response(&mut self, code: FtpReplyCode, msg: &str) -> io::Result<()> {
         self.socket
             .write_all(&FtpMessage::new(code, msg).to_vec())
             .await
@@ -280,16 +282,59 @@ impl Session {
                     .await;
             }
         }
-        Err(ErrorKind::HostUnreachable.into())
+        self.send_response(
+            FtpReplyCode::ErrorOpeningDataConnection,
+            "Failed to open data connection",
+        )
+        .await
     }
     async fn r#type(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
         match s.to_uppercase().as_str() {
-            "A" => self.send_response(FtpReplyCode::CommandOk, "Switching to ASCII mode").await,
-            "I" => self.send_response(FtpReplyCode::CommandOk, "Switching to Binary mode").await,
-            _ => self
-                .send_response(FtpReplyCode::ActionNotTaken, "Unsupported type")
-                .await,
+            "A" => {
+                self.send_response(FtpReplyCode::CommandOk, "Switching to ASCII mode")
+                    .await
+            }
+            "I" => {
+                self.send_response(FtpReplyCode::CommandOk, "Switching to Binary mode")
+                    .await
+            }
+            _ => {
+                self.send_response(FtpReplyCode::ActionNotTaken, "Unsupported type")
+                    .await
+            }
         }
+    }
+
+    async fn stor(&mut self, s: &str) -> std::io::Result<()> {
+        logged!(self);
+        if let Some(data_listener) = &self.data_listener {
+            let (mut data_sock, _) = data_listener.accept().await?;
+            let (mut reader, _) = data_sock.split();
+            self.send_response(
+                FtpReplyCode::FileStatusOkOpeningDataConnection,
+                "Receiving file",
+            )
+            .await?;
+            let file_path = self.working_dir.join(s);
+            let mut file = tokio::fs::File::create(file_path).await?;
+            let mut buf = vec![0; 1024];
+            loop {
+                let n = reader.read(&mut buf).await?;
+                if n == 0 {
+                    break;
+                }
+                file.write_all(&buf[..n]).await?;
+            }
+            self.data_listener = None;
+            return self
+                .send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
+                .await;
+        }
+        self.send_response(
+            FtpReplyCode::ErrorOpeningDataConnection,
+            "Failed to open data connection",
+        )
+        .await
     }
 }

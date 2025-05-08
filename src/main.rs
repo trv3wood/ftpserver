@@ -1,5 +1,6 @@
 use std::{env::set_current_dir, error::Error};
 
+use message::FtpReplyCode;
 use session::Session;
 use tokio::{net::TcpListener, sync::mpsc};
 
@@ -37,6 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 tokio::spawn(async move {
                     if let Err(e) = session.run(shutdown_notify, send).await {
                         log::error!("Session error: {}", e);
+                        let _ = session.send_response(FtpReplyCode::ActionAbortedLocalError, "Connection aborted").await;
                     }
                 });
             }
