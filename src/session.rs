@@ -60,7 +60,7 @@ impl Session {
                 log::info!("Received shutdown signal, closing session.");
             }
         }
-        Ok(())
+        set_current_dir(&self.root)
     }
     async fn process(&mut self) -> std::io::Result<()> {
         let mut buf = vec![0; 128];
@@ -81,11 +81,12 @@ impl Session {
                 "ACCT" => self.acct(args).await,
                 "CWD" => self.cwd(args).await,
                 "PWD" => self.pwd(args).await,
-                "LIST" => self.list(args).await,
+                "LIST" | "NLST" => self.nlst(args).await,
                 "PASV" => self.pasv(args).await,
                 "RETR" => self.retr(args).await,
                 "TYPE" => self.r#type(args).await,
                 "STOR" => self.stor(args).await,
+                "STRU" => self.stru(args).await,
                 "NOOP" => self.send_response(FtpReplyCode::CommandOk, "NOOP").await,
                 "QUIT" => {
                     self.send_response(
@@ -134,10 +135,8 @@ impl Session {
                 .await?;
             return Ok(());
         }
-        dbg!(&self.working_dir);
         let given_path = std::path::Path::new(&s);
-        dbg!(given_path.is_relative());
-        if !given_path.is_dir() && !given_path.is_relative() {
+        if !given_path.is_dir() {
             self.send_response(
                 FtpReplyCode::ActionNotTaken,
                 "The given resource is not a directory.",
@@ -165,9 +164,7 @@ impl Session {
                     )
                     .await?;
                     log::debug!("new working dir: {:?}", &path);
-                    self.working_dir = path;
-                    set_current_dir(&self.working_dir)?;
-                    Ok(())
+                    self.set_pwd(path)
                 } else {
                     self.send_response(FtpReplyCode::ActionNotTaken, "Path not in root")
                         .await
@@ -223,27 +220,21 @@ impl Session {
         self.send_response(FtpReplyCode::EnteringPassiveMode, &response)
             .await
     }
-    async fn list(&mut self, s: &str) -> std::io::Result<()> {
+    async fn nlst(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        if let Some(data_listener) = &self.data_listener {
-            let (mut data_sock, _) = data_listener.accept().await?;
-            let (_, mut writer) = data_sock.split();
-            self.send_response(
-                FtpReplyCode::FileStatusOkOpeningDataConnection,
-                "Sending directory listing",
-            )
-            .await?;
-            let ls = self.exec_list_dir(&self.working_dir.join(s))?;
-            writer.write_all(ls.as_bytes()).await?;
-            self.data_listener = None;
-            return self
-                .send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
-                .await;
-        }
-        Err(ErrorKind::HostUnreachable.into())
+
+        let path = self.working_dir.join(s);
+
+        self.with_data_connection(|mut datasock| async move {
+            // 获取目录列表
+            let entries = Session::exec_list_dir(&path)?;
+            // 写入数据
+            datasock.write_all(entries.as_bytes()).await
+        })
+        .await
     }
 
-    fn exec_list_dir(&self, path: &Path) -> std::io::Result<String> {
+    fn exec_list_dir(path: &Path) -> std::io::Result<String> {
         let mut entries = String::new();
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
@@ -253,41 +244,19 @@ impl Session {
         }
         Ok(entries)
     }
+
     async fn retr(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        if let Some(data_listener) = &self.data_listener {
-            let (mut data_sock, _) = data_listener.accept().await?;
-            let (_, mut writer) = data_sock.split();
-            self.send_response(
-                FtpReplyCode::FileStatusOkOpeningDataConnection,
-                "Sending file",
-            )
-            .await?;
-            let file_path = self.working_dir.join(s);
+        let file_path = self.working_dir.join(s);
+        self.with_data_connection(|mut datasock| async move {
             if file_path.exists() {
                 let mut file = tokio::fs::File::open(file_path).await?;
-                let mut buf = vec![0; 1024];
-                loop {
-                    let n = file.read(&mut buf).await?;
-                    if n == 0 {
-                        break;
-                    }
-                    writer.write_all(&buf[..n]).await?;
-                }
-                self.data_listener = None;
-                return self
-                    .send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
-                    .await;
+                io::copy(&mut file, &mut datasock).await?;
+                Ok(())
             } else {
-                return self
-                    .send_response(FtpReplyCode::FileActionNotTaken, "File not found")
-                    .await;
+                Err(ErrorKind::NotFound.into())
             }
-        }
-        self.send_response(
-            FtpReplyCode::ErrorOpeningDataConnection,
-            "Failed to open data connection",
-        )
+        })
         .await
     }
     async fn r#type(&mut self, s: &str) -> std::io::Result<()> {
@@ -310,33 +279,78 @@ impl Session {
 
     async fn stor(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        if let Some(data_listener) = &self.data_listener {
-            let (mut data_sock, _) = data_listener.accept().await?;
-            let (mut reader, _) = data_sock.split();
-            self.send_response(
-                FtpReplyCode::FileStatusOkOpeningDataConnection,
-                "Receiving file",
-            )
-            .await?;
-            let file_path = self.working_dir.join(s);
+        let file_path = self.working_dir.join(s);
+        self.with_data_connection(|mut datasock| async move {
             let mut file = tokio::fs::File::create(file_path).await?;
-            let mut buf = vec![0; 1024];
-            loop {
-                let n = reader.read(&mut buf).await?;
-                if n == 0 {
-                    break;
-                }
-                file.write_all(&buf[..n]).await?;
-            }
-            self.data_listener = None;
-            return self
-                .send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
-                .await;
-        }
-        self.send_response(
-            FtpReplyCode::ErrorOpeningDataConnection,
-            "Failed to open data connection",
-        )
+            io::copy(&mut datasock, &mut file).await?;
+            Ok(())
+        })
         .await
+    }
+
+    fn set_pwd(&mut self, path: PathBuf) -> std::io::Result<()> {
+        set_current_dir(&path)?;
+        self.working_dir = path;
+        Ok(())
+    }
+
+    async fn stru(&mut self, args: &str) -> std::io::Result<()> {
+        match args {
+            "F" => {
+                self.send_response(FtpReplyCode::CommandOk, "Structure set to File.")
+                    .await
+            }
+            "R" | "P" => {
+                self.send_response(
+                    FtpReplyCode::CommandNotImplementedForParameter,
+                    "not supported",
+                )
+                .await
+            }
+            _ => {
+                self.send_response(FtpReplyCode::SyntaxErrorParameters, "SyntaxErrorParameters")
+                    .await
+            }
+        }
+    }
+    async fn with_data_connection<F, Fut>(&mut self, operation: F) -> std::io::Result<()>
+    where
+        F: FnOnce(TcpStream) -> Fut,
+        Fut: Future<Output = std::io::Result<()>>,
+    {
+        // 取出数据监听器所有权
+        let listener = match self.data_listener.take() {
+            Some(l) => l,
+            None => {
+                self.send_response(
+                    FtpReplyCode::ErrorOpeningDataConnection,
+                    "Failed to open data connection",
+                )
+                .await?;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotConnected,
+                    "No data listener",
+                ));
+            }
+        };
+
+        // 建立数据连接
+        let (data_socket, _) = listener.accept().await?;
+
+        // 发送准备就绪响应
+        self.send_response(
+            FtpReplyCode::FileStatusOkOpeningDataConnection,
+            "Sending data",
+        )
+        .await?;
+
+        // 执行实际操作
+        let result = operation(data_socket).await;
+
+        // 无论成功与否，发送完成响应
+        self.send_response(FtpReplyCode::ClosingDataConnection, "Transfer complete")
+            .await?;
+
+        result
     }
 }
