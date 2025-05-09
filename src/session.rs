@@ -87,6 +87,9 @@ impl Session {
                 "TYPE" => self.r#type(args).await,
                 "STOR" => self.stor(args).await,
                 "STRU" => self.stru(args).await,
+                "DELE" => self.dele(args).await,
+                "RMD" => self.rmd(args).await,
+                "MKD" => self.mkd(args).await,
                 "NOOP" => self.send_response(FtpReplyCode::CommandOk, "NOOP").await,
                 "QUIT" => {
                     self.send_response(
@@ -352,5 +355,35 @@ impl Session {
             .await?;
 
         result
+    }
+    async fn dele(&mut self, args: &str) -> std::io::Result<()> {
+        logged!(self);
+        if let Err(e) = tokio::fs::remove_file(args).await {
+            self.send_response(FtpReplyCode::ActionNotTaken, &e.to_string())
+                .await
+        } else {
+            self.send_response(FtpReplyCode::FileActionCompleted, "deleted")
+                .await
+        }
+    }
+    async fn rmd(&mut self, args: &str) -> std::io::Result<()> {
+        logged!(self);
+        if let Err(e) = tokio::fs::remove_dir_all(args).await {
+            self.send_response(FtpReplyCode::ActionNotTaken, &e.to_string())
+                .await
+        } else {
+            self.send_response(FtpReplyCode::FileActionCompleted, "deleted")
+                .await
+        }
+    }
+    async fn mkd(&mut self, args: &str) -> std::io::Result<()> {
+        logged!(self);
+        if let Err(e) = tokio::fs::create_dir(args).await {
+            self.send_response(FtpReplyCode::ActionNotTaken, &e.to_string())
+                .await
+        } else {
+            self.send_response(FtpReplyCode::PathnameCreated, "directory created")
+                .await
+        }
     }
 }
