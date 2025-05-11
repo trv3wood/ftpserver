@@ -53,7 +53,8 @@ impl Session {
         tokio::select! {
             res = self.process() => {
                 if let Err(e) = res {
-                    log::error!("Error processing command: {}", e);
+                    let _ = self.send_response(FtpReplyCode::ActionAbortedLocalError, "Connection aborted").await;
+                    log::error!("Session error: {}", e);
                 }
             }
             _ = shutdown.recv() => {
@@ -63,7 +64,7 @@ impl Session {
         set_current_dir(&self.root)
     }
     async fn process(&mut self) -> std::io::Result<()> {
-        let mut buf = vec![0; 128];
+        let mut buf = vec![0; 512];
         while let Ok(n) = self.socket.read(&mut buf).await {
             if n == 0 {
                 break;
@@ -90,6 +91,8 @@ impl Session {
                 "DELE" => self.dele(args).await,
                 "RMD" => self.rmd(args).await,
                 "MKD" => self.mkd(args).await,
+                "RNFR" => self.rnfr(args).await,
+                "RNTO" => self.rnto(args).await,
                 "NOOP" => self.send_response(FtpReplyCode::CommandOk, "NOOP").await,
                 "QUIT" => {
                     self.send_response(
@@ -230,14 +233,14 @@ impl Session {
 
         self.with_data_connection(|mut datasock| async move {
             // 获取目录列表
-            let entries = Session::exec_list_dir(&path)?;
+            let entries = Session::exec_list_dir_name(&path)?;
             // 写入数据
             datasock.write_all(entries.as_bytes()).await
         })
         .await
     }
 
-    fn exec_list_dir(path: &Path) -> std::io::Result<String> {
+    fn exec_list_dir_name(path: &Path) -> std::io::Result<String> {
         let mut entries = String::new();
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
@@ -385,5 +388,22 @@ impl Session {
             self.send_response(FtpReplyCode::PathnameCreated, "directory created")
                 .await
         }
+    }
+    async fn rnfr(&mut self, args: &str) -> std::io::Result<()> {
+        logged!(self);
+        if std::fs::exists(args)? {
+            self.send_response(
+                FtpReplyCode::FileActionNeedsFurtherInfo,
+                "Enter target name",
+            )
+            .await
+        } else {
+            self.send_response(FtpReplyCode::ActionNotTaken, "file not exist")
+                .await
+        }
+    }
+
+    async fn rnto(&mut self, args: &str) -> std::io::Result<()> {
+        todo!()
     }
 }

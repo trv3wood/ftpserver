@@ -3,7 +3,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use crate::{message::FtpReplyCode, session::Session};
+use crate::session::Session;
 
 pub struct Server {
     ctrl_socket: TcpListener,
@@ -32,10 +32,7 @@ impl Server {
                     let send = send.clone();
 
                     tokio::spawn(async move {
-                        if let Err(e) = session.run(shutdown_notify, send).await {
-                            log::error!("Session error: {}", e);
-                            let _ = session.send_response(FtpReplyCode::ActionAbortedLocalError, "Connection aborted").await;
-                        }
+                        session.run(shutdown_notify, send).await
                     });
                 }
                 #[allow(unreachable_code)]
@@ -49,7 +46,7 @@ impl Server {
         }
         drop(shutdown_send);
         drop(send);
-        let _ = recv.recv().await; // 等待所有会话完成
+        let _ = recv.recv().await; // 等待所有会话完成，所有发送端drop之后返回一个错误
         Ok(())
     }
 }
