@@ -2,6 +2,7 @@ use std::{
     env::set_current_dir,
     io::ErrorKind,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use tokio::{
@@ -18,6 +19,7 @@ pub struct Session {
     root: PathBuf,
     working_dir: PathBuf,
     data_listener: Option<TcpListener>,
+    rename_from_path: Option<std::path::PathBuf>,
 }
 macro_rules! logged {
     ($session:ident) => {
@@ -38,6 +40,7 @@ impl Session {
             root: std::env::current_dir().unwrap(),
             working_dir: std::env::current_dir().unwrap(),
             data_listener: None,
+            rename_from_path: None,
         }
     }
     pub async fn run(
@@ -82,7 +85,8 @@ impl Session {
                 "ACCT" => self.acct(args).await,
                 "CWD" => self.cwd(args).await,
                 "PWD" => self.pwd(args).await,
-                "LIST" | "NLST" => self.nlst(args).await,
+                "NLST" => self.nlst(args).await,
+                "LIST" => self.list(args).await,
                 "PASV" => self.pasv(args).await,
                 "RETR" => self.retr(args).await,
                 "TYPE" => self.r#type(args).await,
@@ -251,6 +255,16 @@ impl Session {
         Ok(entries)
     }
 
+    async fn list(&mut self, s: &str) -> std::io::Result<()> {
+        logged!(self);
+        let path = self.working_dir.join(s);
+        self.with_data_connection(|mut datasock| async move {
+            let dirlist = Command::new("ls").arg("-all").arg(path).output()?.stdout;
+            datasock.write_all(&dirlist).await
+        })
+        .await
+    }
+
     async fn retr(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
         let file_path = self.working_dir.join(s);
@@ -392,6 +406,7 @@ impl Session {
     async fn rnfr(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
         if std::fs::exists(args)? {
+            self.rename_from_path = Some(args.into());
             self.send_response(
                 FtpReplyCode::FileActionNeedsFurtherInfo,
                 "Enter target name",
@@ -404,6 +419,35 @@ impl Session {
     }
 
     async fn rnto(&mut self, args: &str) -> std::io::Result<()> {
-        todo!()
+        logged!(self);
+        let rename_from = match self.rename_from_path.take() {
+            Some(path) => path,
+            None => {
+                return self
+                    .send_response(
+                        FtpReplyCode::CommandsBadSequence,
+                        "Please specify target file first",
+                    )
+                    .await;
+            }
+        };
+        let mut rename_to = PathBuf::from(args);
+        match (rename_from.is_dir(), rename_to.is_dir()) {
+            (false, true) => {
+                // 文件->路径
+                let filename = rename_from.file_name().unwrap();
+                rename_to.push(filename);
+            }
+            (true, false) => {
+                // 路径->文件
+                return self
+                    .send_response(FtpReplyCode::FileActionNotTaken, "Not a directory")
+                    .await;
+            }
+            _ => {} // 同为文件或路径
+        }
+        std::fs::rename(rename_from, rename_to)?;
+        self.send_response(FtpReplyCode::FileActionCompleted, "Ok")
+            .await
     }
 }
