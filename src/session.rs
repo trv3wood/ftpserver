@@ -2,13 +2,13 @@ use std::{
     env::set_current_dir,
     io::ErrorKind,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{broadcast, mpsc},
+    process::Command
 };
 
 use crate::message::{FtpMessage, FtpReplyCode};
@@ -259,7 +259,7 @@ impl Session {
         logged!(self);
         let path = self.working_dir.join(s);
         self.with_data_connection(|mut datasock| async move {
-            let dirlist = Command::new("ls").arg("-all").arg(path).output()?.stdout;
+            let dirlist = Command::new("ls").arg("-all").arg(path).output().await?.stdout;
             datasock.write_all(&dirlist).await
         })
         .await
