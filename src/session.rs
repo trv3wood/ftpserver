@@ -72,7 +72,7 @@ impl Session {
             if n == 0 {
                 break;
             }
-            let s = String::from_utf8(buf[..n].to_vec()).unwrap();
+            let s = String::from_utf8_lossy(&buf[..n]);
             let s = s.trim_end();
             log::debug!("received command: {}", s);
             let (cmdtype, args) = match s.split_once(' ') {
