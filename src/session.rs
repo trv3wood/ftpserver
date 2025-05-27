@@ -390,7 +390,7 @@ impl Session {
         // 发送准备就绪响应
         self.send_response(
             FtpReplyCode::FileStatusOkOpeningDataConnection,
-            "Sending data",
+            "File Status Ok",
         )
         .await?;
 
