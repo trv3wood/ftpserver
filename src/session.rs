@@ -7,8 +7,8 @@ use std::{
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    process::Command,
     sync::{broadcast, mpsc},
-    process::Command
 };
 
 use crate::message::{FtpMessage, FtpReplyCode};
@@ -259,7 +259,20 @@ impl Session {
         logged!(self);
         let path = self.working_dir.join(s);
         self.with_data_connection(|mut datasock| async move {
-            let dirlist = Command::new("ls").arg("-all").arg(path).output().await?.stdout;
+            #[cfg(not(target_os = "windows"))]
+            let dirlist = Command::new("ls")
+                .arg("-all")
+                .arg(path)
+                .output()
+                .await?
+                .stdout;
+            #[cfg(target_os = "windows")]
+            let dirlist = Command::new("cmd")
+                .arg("/C")
+                .arg(format!("dir {}", path.display()))
+                .output()
+                .await?
+                .stdout;
             datasock.write_all(&dirlist).await
         })
         .await
