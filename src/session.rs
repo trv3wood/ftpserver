@@ -1,6 +1,5 @@
 use std::{
     env::set_current_dir,
-    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
@@ -192,17 +191,15 @@ impl Session {
             self.send_response(FtpReplyCode::ActionNotTaken, "Not logged in")
                 .await
         } else {
-            self.send_response(
-                FtpReplyCode::PathnameCreated,
-                &format!(
-                    "/{}",
-                    self.working_dir
-                        .strip_prefix(self.root.as_path())
-                        .unwrap()
-                        .display()
-                ),
-            )
-            .await
+            let response = self
+                .working_dir
+                .strip_prefix(self.root.as_path())
+                .unwrap()
+                .display()
+                .to_string();
+
+            self.send_response(FtpReplyCode::PathnameCreated, &response)
+                .await
         }
     }
     async fn pasv(&mut self, _s: &str) -> std::io::Result<()> {
@@ -248,9 +245,23 @@ impl Session {
         let mut entries = String::new();
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
-            let mut file_name = entry.file_name().into_string().unwrap_or_default();
-            file_name.push('\n');
-            entries.push_str(&file_name);
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_dir() {
+                    entries.push_str(&format!("{}/\n", entry.file_name().to_string_lossy()));
+                } else if file_type.is_file() {
+                    entries.push_str(&format!("{}\n", entry.file_name().to_string_lossy()));
+                } else {
+                    entries.push_str(&format!(
+                        "{} (symlink)\n",
+                        entry.file_name().to_string_lossy()
+                    ));
+                }
+            } else {
+                entries.push_str(&format!(
+                    "{} (error reading type)\n",
+                    entry.file_name().to_string_lossy()
+                ));
+            }
         }
         Ok(entries)
     }
@@ -281,14 +292,20 @@ impl Session {
     async fn retr(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
         let file_path = self.working_dir.join(s);
+        if !file_path.is_file() {
+            return self
+                .send_response(FtpReplyCode::ActionNotTaken, "Not a file")
+                .await;
+        }
+        if !file_path.exists() {
+            return self
+                .send_response(FtpReplyCode::ActionNotTaken, "File not found")
+                .await;
+        }
         self.with_data_connection(|mut datasock| async move {
-            if file_path.exists() {
-                let mut file = tokio::fs::File::open(file_path).await?;
-                io::copy(&mut file, &mut datasock).await?;
-                Ok(())
-            } else {
-                Err(ErrorKind::NotFound.into())
-            }
+            let mut file = tokio::fs::File::open(file_path).await?;
+            io::copy(&mut file, &mut datasock).await?;
+            Ok(())
         })
         .await
     }
