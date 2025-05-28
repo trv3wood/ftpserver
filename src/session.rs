@@ -157,7 +157,9 @@ impl Session {
     }
 
     async fn exec_cwd(&mut self, path: &Path) -> std::io::Result<()> {
-        match dbg!(path.canonicalize()) {
+        let canonicalized_path = path.canonicalize();
+        log::debug!("CWD canonicalized path: {:?}", &canonicalized_path);
+        match canonicalized_path {
             Ok(path) => {
                 // 处理路径前缀
                 #[cfg(target_os = "windows")]
@@ -165,7 +167,6 @@ impl Session {
                 #[cfg(target_os = "windows")]
                 let path = PathBuf::from(path);
 
-                log::debug!("canonicalize path: {:?}", &path);
                 if path.starts_with(&self.root) {
                     self.send_response(
                         FtpReplyCode::FileActionCompleted,
@@ -197,6 +198,7 @@ impl Session {
                 .unwrap()
                 .display()
                 .to_string();
+            log::debug!("PWD response: {}", response);
 
             self.send_response(FtpReplyCode::PathnameCreated, &response)
                 .await
@@ -263,7 +265,11 @@ impl Session {
                 ));
             }
         }
-        Ok(entries)
+        Ok(if entries.is_empty() {
+            "No files found.\n".to_string()
+        } else {
+            entries
+        })
     }
 
     async fn list(&mut self, s: &str) -> std::io::Result<()> {
