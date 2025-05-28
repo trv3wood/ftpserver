@@ -18,6 +18,7 @@ pub struct Session {
     root: PathBuf,
     working_dir: PathBuf,
     data_listener: Option<TcpListener>,
+    data_port: Option<TcpStream>,
     rename_from_path: Option<std::path::PathBuf>,
 }
 macro_rules! logged {
@@ -39,6 +40,7 @@ impl Session {
             root: std::env::current_dir().unwrap(),
             working_dir: std::env::current_dir().unwrap(),
             data_listener: None,
+            data_port: None,
             rename_from_path: None,
         }
     }
@@ -83,7 +85,7 @@ impl Session {
                 "PASS" => self.pass(args).await,
                 "ACCT" => self.acct(args).await,
                 "CWD" => self.cwd(args).await,
-                "PWD" => self.pwd(args).await,
+                "PWD" | "XPWD" => self.pwd(args).await,
                 "NLST" => self.nlst(args).await,
                 "LIST" => self.list(args).await,
                 "PASV" => self.pasv(args).await,
@@ -96,6 +98,8 @@ impl Session {
                 "MKD" => self.mkd(args).await,
                 "RNFR" => self.rnfr(args).await,
                 "RNTO" => self.rnto(args).await,
+                "OPTS" => self.opts(args).await,
+                "PORT" => self.port(args).await,
                 "NOOP" => self.send_response(FtpReplyCode::CommandOk, "NOOP").await,
                 "QUIT" => {
                     self.send_response(
@@ -200,7 +204,7 @@ impl Session {
                 .to_string();
             log::debug!("PWD response: {}", response);
 
-            self.send_response(FtpReplyCode::PathnameCreated, &response)
+            self.send_response(FtpReplyCode::PathnameCreated, &format!("/{}", response))
                 .await
         }
     }
@@ -209,6 +213,7 @@ impl Session {
         let listener = TcpListener::bind(format!("{}:0", self.socket.local_addr()?.ip())).await?;
         let addr = listener.local_addr()?;
         self.data_listener = Some(listener);
+        self.data_port = None;
 
         // 构造PASV响应
         let (ip, port) = (addr.ip(), addr.port());
@@ -297,7 +302,8 @@ impl Session {
 
     async fn retr(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        let file_path = self.working_dir.join(s);
+        let file_path = self.working_dir.join(s.trim_matches('/'));
+        log::debug!("Retrieving file: {:?}", &file_path);
         if !file_path.is_file() {
             return self
                 .send_response(FtpReplyCode::ActionNotTaken, "Not a file")
@@ -369,34 +375,35 @@ impl Session {
             }
         }
     }
+    async fn get_data_socket(&mut self) -> std::io::Result<TcpStream> {
+        if let Some(socket) = self.data_port.take() {
+            return Ok(socket);
+        }
+        if let Some(listener) = self.data_listener.take() {
+            let (data_socket, _) = listener.accept().await?;
+            return Ok(data_socket);
+        }
+        self.send_response(
+            FtpReplyCode::ErrorOpeningDataConnection,
+            "Failed to open data connection",
+        ).await?;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::NotConnected,
+            "No data connection available",
+        ))
+    }
     async fn with_data_connection<F, Fut>(&mut self, operation: F) -> std::io::Result<()>
     where
         F: FnOnce(TcpStream) -> Fut,
         Fut: Future<Output = std::io::Result<()>>,
     {
-        // 取出数据监听器所有权
-        let listener = match self.data_listener.take() {
-            Some(l) => l,
-            None => {
-                self.send_response(
-                    FtpReplyCode::ErrorOpeningDataConnection,
-                    "Failed to open data connection",
-                )
-                .await?;
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::NotConnected,
-                    "No data listener",
-                ));
-            }
-        };
-
-        // 建立数据连接
-        let (data_socket, _) = listener.accept().await?;
+        // 获取数据连接所有权
+        let data_socket = self.get_data_socket().await?;
 
         // 发送准备就绪响应
         self.send_response(
             FtpReplyCode::FileStatusOkOpeningDataConnection,
-            "File Status Ok",
+            "Opening Data Connection",
         )
         .await?;
 
@@ -485,5 +492,51 @@ impl Session {
         std::fs::rename(rename_from, rename_to)?;
         self.send_response(FtpReplyCode::FileActionCompleted, "Ok")
             .await
+    }
+    
+    async fn opts(&mut self, args: &str) -> std::io::Result<()> {
+        match args {
+            "UTF8 ON" => {
+                self.send_response(FtpReplyCode::CommandOk, "UTF8 mode enabled")
+                    .await
+            }
+            _ => {
+                self.send_response(
+                    FtpReplyCode::SyntaxErrorParameters,
+                    "Unsupported OPTS command",
+                )
+                .await
+            }
+        }
+    }
+    async fn port(&mut self, args: &str) -> std::io::Result<()> {
+        logged!(self);
+        let parts: Vec<&str> = args.split(',').collect();
+        if parts.len() != 6 {
+            return self
+                .send_response(FtpReplyCode::SyntaxErrorParameters, "Invalid PORT command")
+                .await;
+        }
+        let ip = parts[..4].join(".");
+        let p1: u16 = parts[4].parse().unwrap_or(0);
+        let p2: u16 = parts[5].parse().unwrap_or(0);
+        let port = (p1 << 8) | p2;
+
+        let addr = format!("{}:{}", ip, port);
+        self.data_port = Some(TcpStream::connect(addr).await?);
+        log::debug!("Connected to data port: {:?}", &self.data_port);
+        
+        // 发送准备就绪响应
+        self.send_response(
+            FtpReplyCode::FileStatusOkOpeningDataConnection,
+            "File Status Ok",
+        )
+        .await?;
+
+        // 设置数据监听器为None，表示使用PORT模式
+        self.data_listener = None;
+
+        // 执行实际操作
+        Ok(())
     }
 }
