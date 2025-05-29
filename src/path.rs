@@ -57,7 +57,7 @@ impl PathHandler {
     #[cfg(windows)]
     pub fn to_server_path(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
         let path = self.non_canonicalized_path(path)?;
-        dbg!(path.canonicalize())
+        dbg!(dunce::canonicalize(path))
     }
     pub fn non_canonicalized_path(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
         let path = path.as_ref().strip_prefix("/").unwrap_or(path.as_ref());

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
@@ -375,6 +375,7 @@ impl Session {
     }
     async fn dele(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
+        let args = self.path_handler.to_server_path(args)?;
         if let Err(e) = tokio::fs::remove_file(args).await {
             self.send_response(ACTION_NOT_TAKEN, &e.to_string())
                 .await
@@ -405,8 +406,9 @@ impl Session {
     }
     async fn rnfr(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
-        if std::fs::exists(args)? {
-            self.rename_from_path = Some(args.into());
+        let args = self.path_handler.to_server_path(args)?;
+        if std::fs::exists(&args)? {
+            self.rename_from_path = Some(args);
             self.send_response(
                 FILE_ACTION_NEEDS_FURTHER_INFO,
                 "Enter target name",
@@ -431,7 +433,7 @@ impl Session {
                     .await;
             }
         };
-        let mut rename_to = PathBuf::from(args);
+        let mut rename_to = self.path_handler.non_canonicalized_path(args)?;
         match (rename_from.is_dir(), rename_to.is_dir()) {
             (false, true) => {
                 // 文件->路径

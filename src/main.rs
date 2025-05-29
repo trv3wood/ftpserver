@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         #[cfg(target_os = "linux")]
         set_current_dir("/var/ftp")?; // 设置当前目录为/var/ftp
         #[cfg(target_os = "windows")]
-        set_current_dir(r"\\?\C:\\ftp")?; // 设置当前目录为C:\ftp
+        set_current_dir("C:\\ftp")?; // 设置当前目录为C:\ftp
     }
     #[cfg(debug_assertions)]
     let env = env_logger::Env::default().filter_or("RUST_LOG", "debug");
