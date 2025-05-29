@@ -1,7 +1,4 @@
-use std::{
-    env::set_current_dir,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use tokio::{
     io::{self, AsyncReadExt, AsyncWriteExt},
@@ -10,13 +7,14 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use crate::message::*;
+use crate::{message::*, path::PathHandler};
 
 pub struct Session {
     socket: TcpStream,
     logged: bool,
-    root: PathBuf,
-    working_dir: PathBuf,
+    // root: PathBuf,
+    // working_dir: PathBuf,
+    path_handler: PathHandler,
     data_listener: Option<TcpListener>,
     data_port: Option<TcpStream>,
     rename_from_path: Option<std::path::PathBuf>,
@@ -37,8 +35,7 @@ impl Session {
         Self {
             socket,
             logged: false,
-            root: std::env::current_dir().unwrap(),
-            working_dir: PathBuf::from("/"),
+            path_handler: PathHandler::new(std::env::current_dir().unwrap()),
             data_listener: None,
             data_port: None,
             rename_from_path: None,
@@ -65,7 +62,7 @@ impl Session {
                 log::info!("Received shutdown signal, closing session.");
             }
         }
-        set_current_dir(&self.root)
+        Ok(())
     }
     async fn process(&mut self) -> std::io::Result<()> {
         let mut buf = vec![0; 512];
@@ -154,52 +151,23 @@ impl Session {
                 .await?;
             return Ok(());
         }
-        let given_path = self.root.join(s);
-        if !given_path.is_dir() {
-            self.send_response(
-                ACTION_NOT_TAKEN,
-                "The given resource is not a directory.",
-            )
-            .await?;
-            return Ok(());
-        }
-        self.exec_cwd(&given_path).await
-    }
-
-    async fn exec_cwd(&mut self, path: &Path) -> std::io::Result<()> {
-        let canonicalized_path = path.canonicalize();
-        log::debug!("CWD canonicalized path: {:?}", &canonicalized_path);
-        match canonicalized_path {
-            Ok(path) => {
-                // 处理路径前缀
-                #[cfg(target_os = "windows")]
-                let path = path.to_str().unwrap().trim_start_matches(r"\\?\");
-                #[cfg(target_os = "windows")]
-                let path = PathBuf::from(path);
-
-                if path.starts_with(&self.root) {
-                    self.send_response(
-                        FILE_ACTION_COMPLETED,
-                        &format!("Working directory changed to {}", path.display()),
-                    )
-                    .await?;
-                    log::debug!("new working dir: {:?}", &path);
-                    self.set_pwd(path)
-                } else {
-                    self.send_response(ACTION_NOT_TAKEN, "Path not in root")
-                        .await
-                }
+        match self.path_handler.cd(s) {
+            Ok(_) => {
+                let pwd = self.path_handler.get_pwd();
+                self.send_response(FILE_ACTION_COMPLETED, format!("Changed directory to {}", pwd.display()))
+                    .await
             }
             Err(e) => {
-                log::debug!("Error canonicalizing path: {}", e);
-                self.send_response(ACTION_NOT_TAKEN, "Failed ot change directory: The given resource does not exist or permission denied.").await
+                log::debug!("Error changing directory: {}", e);
+                self.send_response(ACTION_NOT_TAKEN, e.to_string())
+                    .await
             }
         }
     }
 
     async fn pwd(&mut self, _s: &str) -> std::io::Result<()> {
-        let pwd = self.working_dir.to_string_lossy().to_string();
-        self.send_response(PATHNAME_CREATED, pwd)
+        let pwd = self.path_handler.get_pwd();
+        self.send_response(PATHNAME_CREATED, pwd.to_string_lossy())
             .await
     }
     async fn pasv(&mut self, _s: &str) -> std::io::Result<()> {
@@ -231,7 +199,7 @@ impl Session {
     async fn nlst(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
 
-        let path = self.working_dir.join(s);
+        let path = self.path_handler.to_server_path(s)?;
 
         self.with_data_connection(|mut datasock| async move {
             // 获取目录列表
@@ -273,7 +241,7 @@ impl Session {
 
     async fn list(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        let path = self.working_dir.join(s);
+        let path = self.path_handler.to_server_path(s)?;
         self.with_data_connection(|mut datasock| async move {
             #[cfg(not(target_os = "windows"))]
             let dirlist = Command::new("ls")
@@ -296,7 +264,7 @@ impl Session {
 
     async fn retr(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        let file_path = self.working_dir.join(s.trim_matches('/'));
+        let file_path = self.path_handler.to_server_path(s)?;
         log::debug!("Retrieving file: {:?}", &file_path);
         if !file_path.is_file() {
             return self
@@ -335,19 +303,13 @@ impl Session {
 
     async fn stor(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        let file_path = self.working_dir.join(s);
+        let file_path = self.path_handler.non_canonicalized_path(s)?;
         self.with_data_connection(|mut datasock| async move {
             let mut file = tokio::fs::File::create(file_path).await?;
             io::copy(&mut datasock, &mut file).await?;
             Ok(())
         })
         .await
-    }
-
-    fn set_pwd(&mut self, path: PathBuf) -> std::io::Result<()> {
-        set_current_dir(&path)?;
-        self.working_dir = path;
-        Ok(())
     }
 
     async fn stru(&mut self, args: &str) -> std::io::Result<()> {
