@@ -54,7 +54,7 @@ impl PathHandler {
         let path = path.as_ref();
         path.strip_prefix(&self.root).unwrap_or(path).to_path_buf()
     }
-    #[cfg(windows)]
+    // #[cfg(windows)]
     pub fn to_server_path(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
         let path = self.non_canonicalized_path(path)?;
         dbg!(dunce::canonicalize(path))
@@ -82,8 +82,17 @@ impl PathHandler {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod tests {
     use super::*;
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_to_server_path() {
+        to_server_path("/var/ftp", "/dir1/doc.txt", "/var/ftp/dir1/doc.txt");
+        to_server_path("/var/ftp", "/dir1", "/var/ftp/dir1");
+        to_server_path("/var/ftp", "dir1/doc.txt", "/var/ftp/dir1/doc.txt");
+        to_server_path("/var/ftp", "dir1", "/var/ftp/dir1");
+    }
     #[test]
     #[cfg(windows)]
     fn test_to_server_path() {
@@ -92,10 +101,27 @@ mod tests {
         to_server_path(r"\\?\C:\\ftp", "dir1\\doc.txt", r"\\?\C:\\ftp\\dir1\\doc.txt");
         to_server_path(r"\\?\C:\\ftp", "dir1", r"\\?\C:\\ftp\\dir1");
     }
+
     fn to_server_path(root: &str, path: &str, expected: &str) {
         let handler = PathHandler::new(root);
         let server_path = handler.to_server_path(path).unwrap();
         assert_eq!(server_path, PathBuf::from(expected));
+    }
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_cd() {
+        cd("/var/ftp", "dir1/doc.txt", "/var/ftp/dir1/doc.txt");
+        cd("/var/ftp", "dir1", "/var/ftp/dir1");
+        cd("/var/ftp", "/dir1/doc.txt", "/var/ftp/dir1/doc.txt");
+        cd("/var/ftp", "/dir1", "/var/ftp/dir1");
+        let mut handler = PathHandler::new("/var/ftp");
+        handler.cd("dir1").unwrap();
+        assert_eq!(handler.get_pwd(), Path::new("/var/ftp/dir1"));
+        handler.cd("..").unwrap();
+        assert_eq!(handler.get_pwd(), Path::new("/var/ftp"));
+        handler.cd("/dir1").unwrap();
+        assert_eq!(handler.get_pwd(), Path::new("/var/ftp/dir1"));
+        assert!(handler.cd("../..").is_err());
     }
     #[test]
     #[cfg(windows)]
