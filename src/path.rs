@@ -116,11 +116,11 @@ mod tests {
         cd("/var/ftp", "/dir1", "/var/ftp/dir1");
         let mut handler = PathHandler::new("/var/ftp");
         handler.cd("dir1").unwrap();
-        assert_eq!(handler.get_pwd(), Path::new("/var/ftp/dir1"));
+        assert_eq!(handler.pwd, Path::new("/var/ftp/dir1"));
         handler.cd("..").unwrap();
-        assert_eq!(handler.get_pwd(), Path::new("/var/ftp"));
+        assert_eq!(handler.pwd, Path::new("/var/ftp"));
         handler.cd("/dir1").unwrap();
-        assert_eq!(handler.get_pwd(), Path::new("/var/ftp/dir1"));
+        assert_eq!(handler.pwd, Path::new("/var/ftp/dir1"));
         assert!(handler.cd("../..").is_err());
     }
     #[test]
@@ -128,11 +128,11 @@ mod tests {
     fn test_cd() {
         let mut handler = PathHandler::new(r"\\?\C:\\ftp");
         handler.cd("dir1").unwrap();
-        assert_eq!(handler.get_pwd(), Path::new(r"\\?\C:\\ftp\\dir1"));
+        assert_eq!(handler.pwd, Path::new(r"\\?\C:\\ftp\\dir1"));
         handler.cd("..").unwrap();
-        assert_eq!(handler.get_pwd(), Path::new(r"\\?\C:\\ftp"));
+        assert_eq!(handler.pwd, Path::new(r"\\?\C:\\ftp"));
         handler.cd("/dir1").unwrap();
-        assert_eq!(handler.get_pwd(), Path::new(r"\\?\C:\\ftp\\dir1"));
+        assert_eq!(handler.pwd, Path::new(r"\\?\C:\\ftp\\dir1"));
         assert!(handler.cd("../..").is_err());
         cd(r"\\?\C:\\ftp", "dir1\\doc.txt", r"\\?\C:\\ftp\\dir1\\doc.txt");
         cd(r"\\?\C:\\ftp", "dir1", r"\\?\C:\\ftp\\dir1");
@@ -142,6 +142,6 @@ mod tests {
     fn cd(root: &str, path: &str, expected: &str) {
         let mut handler = PathHandler::new(root);
         handler.cd(path).unwrap();
-        assert_eq!(handler.get_pwd(), PathBuf::from(expected));
+        assert_eq!(handler.pwd, PathBuf::from(expected));
     }
 }
