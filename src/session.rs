@@ -46,11 +46,8 @@ impl Session {
         mut shutdown: broadcast::Receiver<()>,
         _close_complete: mpsc::Sender<()>,
     ) -> std::io::Result<()> {
-        self.send_response(
-            SERVICE_READY_FOR_NEW_USER,
-            "Service ready for new user",
-        )
-        .await?;
+        self.send_response(SERVICE_READY_FOR_NEW_USER, "Service ready for new user")
+            .await?;
         tokio::select! {
             res = self.process() => {
                 if let Err(e) = res {
@@ -134,15 +131,11 @@ impl Session {
     }
     async fn pass(&mut self, _s: &str) -> std::io::Result<()> {
         self.logged = true;
-        self.send_response(USER_LOGGED_IN, "logged in.")
-            .await
+        self.send_response(USER_LOGGED_IN, "logged in.").await
     }
     async fn acct(&mut self, _s: &str) -> std::io::Result<()> {
-        self.send_response(
-            SYNTAX_ERROR_UNRECOGNIZED_COMMAND,
-            "Unsupported command",
-        )
-        .await
+        self.send_response(SYNTAX_ERROR_UNRECOGNIZED_COMMAND, "Unsupported command")
+            .await
     }
     async fn cwd(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
@@ -154,13 +147,15 @@ impl Session {
         match self.path_handler.cd(s) {
             Ok(_) => {
                 let pwd = self.path_handler.get_pwd();
-                self.send_response(FILE_ACTION_COMPLETED, format!("Changed directory to {}", pwd.display()))
-                    .await
+                self.send_response(
+                    FILE_ACTION_COMPLETED,
+                    format!("Changed directory to {}", pwd.display()),
+                )
+                .await
             }
             Err(e) => {
                 log::debug!("Error changing directory: {}", e);
-                self.send_response(ACTION_NOT_TAKEN, e.to_string())
-                    .await
+                self.send_response(ACTION_NOT_TAKEN, e.to_string()).await
             }
         }
     }
@@ -193,8 +188,7 @@ impl Session {
             p1,
             p2
         );
-        self.send_response(ENTERING_PASSIVE_MODE, response)
-            .await
+        self.send_response(ENTERING_PASSIVE_MODE, response).await
     }
     async fn nlst(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
@@ -267,14 +261,10 @@ impl Session {
         let file_path = self.path_handler.to_server_path(s)?;
         log::debug!("Retrieving file: {:?}", &file_path);
         if !file_path.is_file() {
-            return self
-                .send_response(ACTION_NOT_TAKEN, "Not a file")
-                .await;
+            return self.send_response(ACTION_NOT_TAKEN, "Not a file").await;
         }
         if !file_path.exists() {
-            return self
-                .send_response(ACTION_NOT_TAKEN, "File not found")
-                .await;
+            return self.send_response(ACTION_NOT_TAKEN, "File not found").await;
         }
         self.with_data_connection(|mut datasock| async move {
             let mut file = tokio::fs::File::open(file_path).await?;
@@ -319,11 +309,8 @@ impl Session {
                     .await
             }
             "R" | "P" => {
-                self.send_response(
-                    COMMAND_NOT_IMPLEMENTED_FOR_PARAMETER,
-                    "not supported",
-                )
-                .await
+                self.send_response(COMMAND_NOT_IMPLEMENTED_FOR_PARAMETER, "not supported")
+                    .await
             }
             _ => {
                 self.send_response(SYNTAX_ERROR_PARAMETERS, "SyntaxErrorParameters")
@@ -377,28 +364,23 @@ impl Session {
         logged!(self);
         let args = self.path_handler.to_server_path(args)?;
         if let Err(e) = tokio::fs::remove_file(args).await {
-            self.send_response(ACTION_NOT_TAKEN, &e.to_string())
-                .await
+            self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
         } else {
-            self.send_response(FILE_ACTION_COMPLETED, "deleted")
-                .await
+            self.send_response(FILE_ACTION_COMPLETED, "deleted").await
         }
     }
     async fn rmd(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
         if let Err(e) = tokio::fs::remove_dir_all(args).await {
-            self.send_response(ACTION_NOT_TAKEN, &e.to_string())
-                .await
+            self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
         } else {
-            self.send_response(FILE_ACTION_COMPLETED, "deleted")
-                .await
+            self.send_response(FILE_ACTION_COMPLETED, "deleted").await
         }
     }
     async fn mkd(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
         if let Err(e) = tokio::fs::create_dir(args).await {
-            self.send_response(ACTION_NOT_TAKEN, &e.to_string())
-                .await
+            self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
         } else {
             self.send_response(PATHNAME_CREATED, "directory created")
                 .await
@@ -409,14 +391,10 @@ impl Session {
         let args = self.path_handler.to_server_path(args)?;
         if std::fs::exists(&args)? {
             self.rename_from_path = Some(args);
-            self.send_response(
-                FILE_ACTION_NEEDS_FURTHER_INFO,
-                "Enter target name",
-            )
-            .await
-        } else {
-            self.send_response(ACTION_NOT_TAKEN, "file not exist")
+            self.send_response(FILE_ACTION_NEEDS_FURTHER_INFO, "Enter target name")
                 .await
+        } else {
+            self.send_response(ACTION_NOT_TAKEN, "file not exist").await
         }
     }
 
@@ -426,10 +404,7 @@ impl Session {
             Some(path) => path,
             None => {
                 return self
-                    .send_response(
-                        COMMANDS_BAD_SEQUENCE,
-                        "Please specify target file first",
-                    )
+                    .send_response(COMMANDS_BAD_SEQUENCE, "Please specify target file first")
                     .await;
             }
         };
@@ -449,22 +424,15 @@ impl Session {
             _ => {} // 同为文件或路径
         }
         std::fs::rename(rename_from, rename_to)?;
-        self.send_response(FILE_ACTION_COMPLETED, "Ok")
-            .await
+        self.send_response(FILE_ACTION_COMPLETED, "Ok").await
     }
 
     async fn opts(&mut self, args: &str) -> std::io::Result<()> {
         match args {
-            "UTF8 ON" => {
-                self.send_response(COMMAND_OK, "UTF8 mode enabled")
-                    .await
-            }
+            "UTF8 ON" => self.send_response(COMMAND_OK, "UTF8 mode enabled").await,
             _ => {
-                self.send_response(
-                    SYNTAX_ERROR_PARAMETERS,
-                    "Unsupported OPTS command",
-                )
-                .await
+                self.send_response(SYNTAX_ERROR_PARAMETERS, "Unsupported OPTS command")
+                    .await
             }
         }
     }
@@ -486,11 +454,8 @@ impl Session {
         log::debug!("Connected to data port: {:?}", &self.data_port);
 
         // 发送准备就绪响应
-        self.send_response(
-            FILE_STATUS_OK_OPENING_DATA_CONNECTION,
-            "File Status Ok",
-        )
-        .await?;
+        self.send_response(FILE_STATUS_OK_OPENING_DATA_CONNECTION, "File Status Ok")
+            .await?;
 
         // 设置数据监听器为None，表示使用PORT模式
         self.data_listener = None;

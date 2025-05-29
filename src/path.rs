@@ -19,7 +19,10 @@ impl PathHandler {
     }
     pub fn cd(&mut self, new_pwd: impl Into<PathBuf>) -> std::io::Result<()> {
         let client_path: PathBuf = new_pwd.into();
-        let client_path = client_path.strip_prefix("/").unwrap_or(&client_path).to_path_buf();
+        let client_path = client_path
+            .strip_prefix("/")
+            .unwrap_or(&client_path)
+            .to_path_buf();
         let server_path = self.to_server_path(&client_path)?;
         if !dbg!(&server_path).is_absolute() {
             return Err(std::io::Error::new(
@@ -54,7 +57,7 @@ impl PathHandler {
         let path = path.as_ref();
         path.strip_prefix(&self.root).unwrap_or(path).to_path_buf()
     }
-    // #[cfg(windows)]
+
     pub fn to_server_path(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
         let path = self.non_canonicalized_path(path)?;
         dbg!(dunce::canonicalize(path))
@@ -69,10 +72,7 @@ impl PathHandler {
             let path = path.to_path_buf();
             dbg!(&path);
             let local_relative = path.strip_prefix("/").map_err(|e| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    e.to_string()
-                )
+                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
             })?;
             dbg!(&local_relative);
             dbg!(self.root.join(local_relative))
@@ -96,10 +96,10 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_to_server_path() {
-        to_server_path(r"\\?\C:\\ftp", "/dir1\\doc.txt", r"\\?\C:\\ftp\\dir1\\doc.txt");
-        to_server_path(r"\\?\C:\\ftp", "/dir1", r"\\?\C:\\ftp\\dir1");
-        to_server_path(r"\\?\C:\\ftp", "dir1\\doc.txt", r"\\?\C:\\ftp\\dir1\\doc.txt");
-        to_server_path(r"\\?\C:\\ftp", "dir1", r"\\?\C:\\ftp\\dir1");
+        to_server_path(r"C:\\ftp", "/dir1\\doc.txt", r"C:\\ftp\\dir1\\doc.txt");
+        to_server_path(r"C:\\ftp", "/dir1", r"C:\\ftp\\dir1");
+        to_server_path(r"C:\\ftp", "dir1\\doc.txt", r"C:\\ftp\\dir1\\doc.txt");
+        to_server_path(r"C:\\ftp", "dir1", r"C:\\ftp\\dir1");
     }
 
     fn to_server_path(root: &str, path: &str, expected: &str) {
@@ -126,18 +126,18 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_cd() {
-        let mut handler = PathHandler::new(r"\\?\C:\\ftp");
+        let mut handler = PathHandler::new(r"C:\\ftp");
         handler.cd("dir1").unwrap();
-        assert_eq!(handler.pwd, Path::new(r"\\?\C:\\ftp\\dir1"));
+        assert_eq!(handler.pwd, Path::new(r"C:\\ftp\\dir1"));
         handler.cd("..").unwrap();
-        assert_eq!(handler.pwd, Path::new(r"\\?\C:\\ftp"));
+        assert_eq!(handler.pwd, Path::new(r"C:\\ftp"));
         handler.cd("/dir1").unwrap();
-        assert_eq!(handler.pwd, Path::new(r"\\?\C:\\ftp\\dir1"));
+        assert_eq!(handler.pwd, Path::new(r"C:\\ftp\\dir1"));
         assert!(handler.cd("../..").is_err());
-        cd(r"\\?\C:\\ftp", "dir1\\doc.txt", r"\\?\C:\\ftp\\dir1\\doc.txt");
-        cd(r"\\?\C:\\ftp", "dir1", r"\\?\C:\\ftp\\dir1");
-        cd(r"\\?\C:\\ftp", "/dir1\\doc.txt", r"\\?\C:\\ftp\\dir1\\doc.txt");
-        cd(r"\\?\C:\\ftp", "/dir1", r"\\?\C:\\ftp\\dir1");
+        cd(r"C:\\ftp", "dir1\\doc.txt", r"C:\\ftp\\dir1\\doc.txt");
+        cd(r"C:\\ftp", "dir1", r"C:\\ftp\\dir1");
+        cd(r"C:\\ftp", "/dir1\\doc.txt", r"C:\\ftp\\dir1\\doc.txt");
+        cd(r"C:\\ftp", "/dir1", r"C:\\ftp\\dir1");
     }
     fn cd(root: &str, path: &str, expected: &str) {
         let mut handler = PathHandler::new(root);

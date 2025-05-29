@@ -3,9 +3,9 @@ use std::{env::set_current_dir, error::Error};
 use tokio::net::TcpListener;
 
 mod message;
+mod path;
 mod server;
 mod session;
-mod path;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
