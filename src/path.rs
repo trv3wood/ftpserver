@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use crate::mydbg;
+
 pub struct PathHandler {
     pwd: PathBuf,
     root: PathBuf,
@@ -24,7 +26,7 @@ impl PathHandler {
             .unwrap_or(&client_path)
             .to_path_buf();
         let server_path = self.to_server_path(&client_path)?;
-        if !dbg!(&server_path).is_absolute() {
+        if !mydbg!(&server_path).is_absolute() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "Path must be absolute",
@@ -50,7 +52,7 @@ impl PathHandler {
     }
 
     pub fn is_within_root(&self, path: &PathBuf) -> bool {
-        dbg!(path, &self.root);
+        mydbg!(path, &self.root);
         path.starts_with(&self.root)
     }
     pub fn to_client_path(&self, path: impl AsRef<Path>) -> PathBuf {
@@ -60,22 +62,22 @@ impl PathHandler {
 
     pub fn to_server_path(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
         let path = self.non_canonicalized_path(path)?;
-        dbg!(dunce::canonicalize(path))
+        mydbg!(dunce::canonicalize(path))
     }
     pub fn non_canonicalized_path(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
         let path = path.as_ref().strip_prefix("/").unwrap_or(path.as_ref());
-        dbg!(path);
-        let server_path = if dbg!(path.is_relative()) {
+        mydbg!(path);
+        let server_path = if mydbg!(path.is_relative()) {
             let path = self.pwd.join(path);
-            dbg!(path)
+            mydbg!(path)
         } else {
             let path = path.to_path_buf();
-            dbg!(&path);
+            mydbg!(&path);
             let local_relative = path.strip_prefix("/").map_err(|e| {
                 std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
             })?;
-            dbg!(&local_relative);
-            dbg!(self.root.join(local_relative))
+            mydbg!(&local_relative);
+            mydbg!(self.root.join(local_relative))
         };
         Ok(server_path)
     }

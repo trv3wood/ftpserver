@@ -6,7 +6,26 @@ mod message;
 mod path;
 mod server;
 mod session;
-
+#[macro_export]
+macro_rules! mydbg {
+    ($($val:expr),+ $(,)?) => {
+        if cfg!(debug_assertions) {
+            dbg!($($val),+)
+        } else {
+            ($($val),+)
+        }
+    };
+    ($val:expr $(,)?) => {
+        if cfg!(debug_assertions) {
+            dbg!($val)
+        } else {
+            $val
+        }
+    };
+    () => {
+        dbg!()
+    }
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(specified_dir) = std::env::args().nth(1) {
