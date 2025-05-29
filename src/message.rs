@@ -1,81 +1,42 @@
-#[derive(Debug, Clone, Copy)]
-#[repr(u16)]
-#[allow(unused)]
-pub enum FtpReplyCode {
-    // Reply codes from RFC 959 (plain FTP)
-    // https://tools.ietf.org/html/rfc959
-    CommandOk = 200,
-    SyntaxErrorUnrecognizedCommand = 500,
-    SyntaxErrorParameters = 501,
-    CommandNotImplementedSuperflous = 202,
-    CommandNotImplemented = 502,
-    CommandsBadSequence = 503,
-    CommandNotImplementedForParameter = 504,
-
-    ReplyRestartMarker = 110,
-    ReplySystemStatus = 211,
-    DirectoryStatus = 212,
-    FileStatus = 213,
-    HelpMessage = 214,
-    NameSystemType = 215,
-
-    ServiceReadyInMinutes = 120,
-    ServiceReadyForNewUser = 220,
-    ServiceClosingControlConnection = 221,
-    ServiceNotAvailable = 421,
-    DataConnectionOpenTransferStarting = 125,
-    DataConnectionOpenNoTransfer = 225,
-    ErrorOpeningDataConnection = 425,
-    ClosingDataConnection = 226,
-    TransferAborted = 426,
-    EnteringPassiveMode = 227,
-
-    UserLoggedIn = 230,
-    NotLoggedIn = 530,
-    UserNameOk = 331,
-    NeedAccountForLogin = 332,
-    NeedAccountForStoringFiles = 532,
-    FileStatusOkOpeningDataConnection = 150,
-    FileActionCompleted = 250,
-    PathnameCreated = 257,
-    FileActionNeedsFurtherInfo = 350,
-    FileActionNotTaken = 450,
-    ActionNotTaken = 550,
-    ActionAbortedLocalError = 451,
-    ActionAbortedPageTypeUnknown = 551,
-    ActionNotTakenInsufficientStorageSpace = 452,
-    FileActionAborted = 552,
-    ActionNotTakenFilenameNotAllowed = 553,
-}
-
-pub struct FtpMessage {
-    code: FtpReplyCode,
-    msg: String,
-}
-
-impl FtpMessage {
-    pub fn new(code: FtpReplyCode, msg: &str) -> Self {
-        Self {
-            code,
-            msg: msg.to_string(),
-        }
-    }
-    pub fn to_vec(&self) -> Vec<u8> {
-        format!("{} {}\r\n", self.code as u16, self.msg).into_bytes()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ftpmsg() {
-        assert_eq!(
-            FtpMessage::new(FtpReplyCode::CommandOk, "Service ready for new user")
-                .to_vec()
-                .as_slice(),
-            b"200 Service ready for new user\r\n"
-        );
-    }
-}
+#![allow(unused)]
+pub const COMMAND_OK: &'static str = "200";
+pub const SYNTAX_ERROR_UNRECOGNIZED_COMMAND : &'static str = "500";
+pub const SYNTAX_ERROR_PARAMETERS : &'static str = "501";
+pub const COMMAND_NOT_IMPLEMENTED_SUPERFLOUS : &'static str = "202";
+pub const COMMAND_NOT_IMPLEMENTED : &'static str = "502";
+pub const COMMANDS_BAD_SEQUENCE : &'static str = "503";
+pub const COMMAND_NOT_IMPLEMENTED_FOR_PARAMETER : &'static str = "504";
+pub const REPLY_RESTART_MARKER : &'static str = "110";
+pub const REPLY_SYSTEM_STATUS : &'static str = "211";
+pub const DIRECTORY_STATUS : &'static str = "212";
+pub const FILE_STATUS : &'static str = "213";
+pub const HELP_MESSAGE : &'static str = "214";
+pub const NAME_SYSTEM_TYPE : &'static str = "215";
+ 
+pub const SERVICE_READY_IN_MINUTES : &'static str = "120";
+pub const SERVICE_READY_FOR_NEW_USER : &'static str = "220";
+pub const SERVICE_CLOSING_CONTROL_CONNECTION : &'static str = "221";
+pub const SERVICE_NOT_AVAILABLE : &'static str = "421";
+pub const DATA_CONNECTION_OPEN_TRANSFER_STARTING : &'static str = "125";
+pub const DATA_CONNECTION_OPEN_NO_TRANSFER : &'static str = "225";
+pub const ERROR_OPENING_DATA_CONNECTION : &'static str = "425";
+pub const CLOSING_DATA_CONNECTION : &'static str = "226";
+pub const TRANSFER_ABORTED : &'static str = "426";
+pub const ENTERING_PASSIVE_MODE : &'static str = "227";
+ 
+pub const USER_LOGGED_IN : &'static str = "230";
+pub const NOT_LOGGED_IN : &'static str = "530";
+pub const USER_NAME_OK : &'static str = "331";
+pub const NEED_ACCOUNT_FOR_LOGIN : &'static str = "332";
+pub const NEED_ACCOUNT_FOR_STORING_FILES : &'static str = "532";
+pub const FILE_STATUS_OK_OPENING_DATA_CONNECTION : &'static str = "150";
+pub const FILE_ACTION_COMPLETED : &'static str = "250";
+pub const PATHNAME_CREATED : &'static str = "257";
+pub const FILE_ACTION_NEEDS_FURTHER_INFO : &'static str = "350";
+pub const FILE_ACTION_NOT_TAKEN : &'static str = "450";
+pub const ACTION_NOT_TAKEN : &'static str = "550";
+pub const ACTION_ABORTED_LOCAL_ERROR : &'static str = "451";
+pub const ACTION_ABORTED_PAGE_TYPE_UNKNOWN : &'static str = "551";
+pub const ACTION_NOT_TAKEN_INSUFFICIENT_STORAGE_SPACE : &'static str = "452";
+pub const FILE_ACTION_ABORTED : &'static str = "552";
+pub const ACTION_NOT_TAKEN_FILENAME_NOT_ALLOWED : &'static str = "553";
