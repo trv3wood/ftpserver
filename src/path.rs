@@ -23,9 +23,8 @@ impl PathHandler {
         let client_path: PathBuf = new_pwd.into();
         let client_path = client_path
             .strip_prefix("/")
-            .unwrap_or(&client_path)
-            .to_path_buf();
-        let server_path = self.to_server_path(&client_path)?;
+            .unwrap_or(&client_path);
+        let server_path = self.to_server_path(client_path)?;
         if !mydbg!(&server_path).is_absolute() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
