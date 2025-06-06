@@ -362,25 +362,29 @@ impl Session {
     }
     async fn dele(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
-        let args = self.path_handler.to_server_path(args)?;
-        if let Err(e) = tokio::fs::remove_file(args).await {
-            self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
-        } else {
-            self.send_response(FILE_ACTION_COMPLETED, "deleted").await
+        match self.path_handler.to_server_path(args) {
+            Ok(path) => {
+                if let Err(e) = tokio::fs::remove_file(path).await {
+                    self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
+                } else {
+                    self.send_response(FILE_ACTION_COMPLETED, "File deleted")
+                        .await
+                }
+            }
+            Err(e) => self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await,
         }
     }
     async fn rmd(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
-        let path = self.path_handler.to_server_path(args)?;
-        if !path.is_dir() {
-            return self
-                .send_response(ACTION_NOT_TAKEN, "Not a directory")
-                .await;
-        }
-        if let Err(e) = tokio::fs::remove_dir_all(path).await {
-            self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
-        } else {
-            self.send_response(FILE_ACTION_COMPLETED, "deleted").await
+        match self.path_handler.to_server_path(args) {
+            Ok(path) => {
+                if let Err(e) = tokio::fs::remove_dir_all(path).await {
+                    self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
+                } else {
+                    self.send_response(FILE_ACTION_COMPLETED, "deleted").await
+                }
+            }
+            Err(e) => self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await,
         }
     }
     async fn mkd(&mut self, args: &str) -> std::io::Result<()> {
@@ -400,13 +404,13 @@ impl Session {
     }
     async fn rnfr(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
-        let args = self.path_handler.to_server_path(args)?;
-        if std::fs::exists(&args)? {
-            self.rename_from_path = Some(args);
-            self.send_response(FILE_ACTION_NEEDS_FURTHER_INFO, "Enter target name")
-                .await
-        } else {
-            self.send_response(ACTION_NOT_TAKEN, "file not exist").await
+        match self.path_handler.to_server_path(args) {
+            Ok(path) => {
+                self.rename_from_path = Some(path);
+                self.send_response(FILE_ACTION_NEEDS_FURTHER_INFO, "Enter target name")
+                    .await
+            }
+            Err(e) => self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await,
         }
     }
 
