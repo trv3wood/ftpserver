@@ -7,7 +7,7 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use crate::{message::*, path::PathHandler};
+use crate::{message::*, mydbg, path::PathHandler};
 
 pub struct Session {
     socket: TcpStream,
@@ -371,7 +371,13 @@ impl Session {
     }
     async fn rmd(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
-        if let Err(e) = tokio::fs::remove_dir_all(args).await {
+        let path = self.path_handler.to_server_path(args)?;
+        if !path.is_dir() {
+            return self
+                .send_response(ACTION_NOT_TAKEN, "Not a directory")
+                .await;
+        }
+        if let Err(e) = tokio::fs::remove_dir_all(path).await {
             self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
         } else {
             self.send_response(FILE_ACTION_COMPLETED, "deleted").await
@@ -379,7 +385,13 @@ impl Session {
     }
     async fn mkd(&mut self, args: &str) -> std::io::Result<()> {
         logged!(self);
-        if let Err(e) = tokio::fs::create_dir(args).await {
+        let path = match self.path_handler.non_canonicalized_path(args) {
+            Ok(path) => path,
+            Err(e) => {
+                return self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await;
+            }
+        };
+        if let Err(e) = tokio::fs::create_dir(path).await {
             self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await
         } else {
             self.send_response(PATHNAME_CREATED, "directory created")
@@ -409,17 +421,12 @@ impl Session {
             }
         };
         let mut rename_to = self.path_handler.non_canonicalized_path(args)?;
+        mydbg!((&rename_from, &rename_to));
         match (rename_from.is_dir(), rename_to.is_dir()) {
             (false, true) => {
                 // 文件->路径
                 let filename = rename_from.file_name().unwrap();
                 rename_to.push(filename);
-            }
-            (true, false) => {
-                // 路径->文件
-                return self
-                    .send_response(FILE_ACTION_NOT_TAKEN, "Not a directory")
-                    .await;
             }
             _ => {} // 同为文件或路径
         }
