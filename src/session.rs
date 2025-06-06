@@ -430,8 +430,10 @@ impl Session {
             }
             _ => {} // 同为文件或路径
         }
-        std::fs::rename(rename_from, rename_to)?;
-        self.send_response(FILE_ACTION_COMPLETED, "Ok").await
+        match std::fs::rename(rename_from, rename_to) {
+            Ok(()) => self.send_response(FILE_ACTION_COMPLETED, "Ok").await,
+            Err(e) => self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await,
+        }
     }
 
     async fn opts(&mut self, args: &str) -> std::io::Result<()> {

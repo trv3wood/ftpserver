@@ -62,20 +62,12 @@ impl PathHandler {
         mydbg!(dunce::canonicalize(path))
     }
     pub fn non_canonicalized_path(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
-        let path = path.as_ref().strip_prefix("/").unwrap_or(path.as_ref());
+        let path = path.as_ref();
+        if path.starts_with("/") {
+            return Ok(self.root.join(path.strip_prefix("/").unwrap()));
+        }
         mydbg!(path);
-        let server_path = if mydbg!(path.is_relative()) {
-            let path = self.pwd.join(path);
-            mydbg!(path)
-        } else {
-            let path = path.to_path_buf();
-            mydbg!(&path);
-            let local_relative = path.strip_prefix("/").map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, e.to_string())
-            })?;
-            mydbg!(&local_relative);
-            mydbg!(self.root.join(local_relative))
-        };
+        let server_path = self.pwd.join(path);
         Ok(server_path)
     }
 }
