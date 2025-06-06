@@ -258,20 +258,19 @@ impl Session {
 
     async fn retr(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
-        let file_path = self.path_handler.to_server_path(s)?;
-        log::debug!("Retrieving file: {:?}", &file_path);
-        if !file_path.is_file() {
-            return self.send_response(ACTION_NOT_TAKEN, "Not a file").await;
+        match self.path_handler.to_server_path(s) {
+            Ok(file_path) => {
+                self.with_data_connection(|mut datasock| async move {
+                    let mut file = tokio::fs::File::open(file_path).await?;
+                    io::copy(&mut file, &mut datasock).await?;
+                    Ok(())
+                })
+                .await
+            }
+            Err(e) => {
+                return self.send_response(ACTION_NOT_TAKEN, &e.to_string()).await;
+            }
         }
-        if !file_path.exists() {
-            return self.send_response(ACTION_NOT_TAKEN, "File not found").await;
-        }
-        self.with_data_connection(|mut datasock| async move {
-            let mut file = tokio::fs::File::open(file_path).await?;
-            io::copy(&mut file, &mut datasock).await?;
-            Ok(())
-        })
-        .await
     }
     async fn r#type(&mut self, s: &str) -> std::io::Result<()> {
         logged!(self);
