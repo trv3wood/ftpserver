@@ -19,11 +19,9 @@ impl PathHandler {
     fn set_pwd(&mut self, new_pwd: PathBuf) {
         self.pwd = new_pwd;
     }
-    pub fn cd(&mut self, new_pwd: impl Into<PathBuf>) -> std::io::Result<()> {
-        let client_path: PathBuf = new_pwd.into();
-        let client_path = client_path
-            .strip_prefix("/")
-            .unwrap_or(&client_path);
+    pub fn cd(&mut self, new_pwd: impl AsRef<Path>) -> std::io::Result<()> {
+        let client_path = new_pwd.as_ref();
+        let client_path = client_path.strip_prefix("/").unwrap_or(&client_path);
         let server_path = self.to_server_path(client_path)?;
         if !mydbg!(&server_path).is_absolute() {
             return Err(std::io::Error::new(

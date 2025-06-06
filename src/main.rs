@@ -23,7 +23,9 @@ macro_rules! mydbg {
         }
     };
     () => {
-        dbg!()
+        if cfg!(debug_assertions) {
+            dbg!()
+        }
     }
 }
 #[tokio::main]
